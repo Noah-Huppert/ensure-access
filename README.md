@@ -7,11 +7,13 @@ and directories.
 - [Usage](#usage)
 
 # Overview
-Makes sure that files have a minimum level of access.
+Makes sure that files and directories have the required permissions.
 
 # Usage
 ```
-ensure-access -p PATH -m MIN_MODE
+ensure-access -path PATH -mode MODE_OCTALS
 ```
 
-The `-p PATH` argument can be specified more than once.
+The `-path PATH` argument can be specified more than once.  
+
+Run `ensure-access -h` for more information.

@@ -145,6 +145,11 @@ func (p permissions) octal() uint32 {
 	return v
 }
 
+// octalString returns the value of the octal() method converted to a string
+func (p permissions) octalString() string {
+	return strconv.FormatUint(uint64(p.octal()), 8)
+}
+
 // or sets the values of the read, write, and execute fields by or-ing them
 // with the same fields in the b argument
 func (p *permissions) or(b permissions) {
@@ -182,8 +187,8 @@ func (p permissionsSet) String() string {
 	return fmt.Sprintf("%s %s %s", p.owner, p.group, p.everyone)
 }
 
-// octal returns a 4 digit octal representation of the permissionsSet. The dir
-// argument indicates if the directory bit should be set to "1".
+// octal returns a 3-4 digit octal representation of the permissionsSet. The
+// dir argument indicates if the directory bit should be set to "1".
 func (p permissionsSet) octal(dir bool) uint32 {
 	var dirBit uint32 = 0
 	if dir {
@@ -198,6 +203,22 @@ func (p permissionsSet) octal(dir bool) uint32 {
 	return n
 }
 
+// octalString returns a 4 digit octal representation of the permissionsSet.
+// The dir argument indicates if the directory bit hsould be set to "1".
+func (p permissionsSet) octalString(dir bool) string {
+	v := "0"
+
+	if dir {
+		v = "1"
+	}
+
+	v += p.owner.octalString()
+	v += p.group.octalString()
+	v += p.everyone.octalString()
+
+	return v
+}
+
 // or runs permissions.or() on the owner, group, and everyone fields against
 // the same fields in the b argument
 func (p *permissionsSet) or(b permissionsSet) {
@@ -208,7 +229,7 @@ func (p *permissionsSet) or(b permissionsSet) {
 
 // setPermissions ensures that every file / directory in paths has the
 // permissions specified in perms
-func setPermissions(logger golog.Logger, paths []string,
+func setPermissions(logger golog.Logger, dryRun bool, paths []string,
 	perms permissionsSet) error {
 
 	for _, targetPath := range paths {
@@ -222,8 +243,8 @@ func setPermissions(logger golog.Logger, paths []string,
 			// Get existing permissions
 			modeBits := []uint32{}
 			infoMode := uint32(info.Mode())
-			modeBits = append(modeBits, 0x1C0&infoMode)
-			modeBits = append(modeBits, 0x38&infoMode)
+			modeBits = append(modeBits, (0x1C0&infoMode)>>6)
+			modeBits = append(modeBits, (0x38&infoMode)>>3)
 			modeBits = append(modeBits, 0x7&infoMode)
 
 			currentPerms := newPermissionsSet(modeBits)
@@ -237,23 +258,25 @@ func setPermissions(logger golog.Logger, paths []string,
 				octal := updatedPerms.octal(info.IsDir())
 				fileMode := os.FileMode(octal)
 
-				err := os.Chmod(targetPath, fileMode)
-				if err != nil {
-					return fmt.Errorf("error running "+
-						"chmod: %s", err.Error())
+				if !dryRun {
+					err := os.Chmod(path, fileMode)
+					if err != nil {
+						return fmt.Errorf("error running chmod: %s", err.Error())
+					}
 				}
 
-				logger.Infof("chmod %s %s",
-					strconv.FormatUint(uint64(octal), 8),
-					path)
+				dryRunStr := ""
+				if dryRun {
+					dryRunStr = "[dry run] "
+				}
+				logger.Infof("%schmod %s %s", dryRunStr, updatedPerms.octalString(info.IsDir()), path)
 			}
 
 			return nil
 		})
 
 		if err != nil {
-			return fmt.Errorf("error ensuring permissions for "+
-				"\"%s\": %s", targetPath, err.Error())
+			return fmt.Errorf("error ensuring permissions for \"%s\": %s", targetPath, err.Error())
 		}
 	}
 
@@ -268,11 +291,11 @@ func main() {
 	// {{{2 Define flags
 	var mode modeFlag
 	var paths fileArrayFlag
+	var dryRun bool
 
-	flag.Var(&mode, "mode", "3 digit octal representation of permissions "+
-		"to set for files / directories")
-	flag.Var(&paths, "path", "Files / directories for which permissions "+
-		"will be set")
+	flag.Var(&mode, "mode", "3 digit octal representation of permissions to set for files / directories")
+	flag.Var(&paths, "path", "Files / directories for which permissions will be set")
+	flag.BoolVar(&dryRun, "dry-run", false, "Print actions which would occur without executing actions")
 
 	// {{{2 Parse flags
 	flag.Parse()
@@ -292,5 +315,5 @@ func main() {
 	perms := newPermissionsSet(mode)
 
 	// {{{1 Set permissions once on startup
-	setPermissions(logger, paths, perms)
+	setPermissions(logger, dryRun, paths, perms)
 }

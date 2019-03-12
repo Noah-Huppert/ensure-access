@@ -4,23 +4,31 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/Noah-Huppert/golog"
 )
 
-// arrayFlag allows a command line flag to be passed multiple times
-type arrayFlag []string
+// fileArrayFlag allows multiple file paths to be passed as flags
+type fileArrayFlag []string
 
-// String returns a string representation of the values in an arrayFlag
-func (f *arrayFlag) String() string {
+// String returns a string representation of the values in an fileArrayFlag
+func (f *fileArrayFlag) String() string {
 	return strings.Join(*f, ",")
 }
 
-// Set adds a value to the arrayFlag
-func (f *arrayFlag) Set(v string) error {
+// Set adds a value to the fileArrayFlag
+func (f *fileArrayFlag) Set(v string) error {
+	// Check if file exists
+	if _, err := os.Stat(v); os.IsNotExist(err) {
+		return fmt.Errorf("file / directory \"%s\" does not exist", v)
+	}
+
+	// Add if exists
 	*f = append(*f, v)
+
 	return nil
 }
 
@@ -124,7 +132,7 @@ func main() {
 	// {{{1 Flags
 	// {{{2 Define flags
 	var mode modeFlag
-	var paths arrayFlag
+	var paths fileArrayFlag
 
 	flag.Var(&mode, "mode", "3 digit octal representation of permissions "+
 		"to set for files / directories")
@@ -150,5 +158,4 @@ func main() {
 	groupPerms := newPermissions(mode[1])
 	everyonePerms := newPermissions(mode[2])
 
-	logger.Debugf("%s %s %s", ownerPerms, groupPerms, everyonePerms)
 }

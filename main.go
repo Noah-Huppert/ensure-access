@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -33,7 +34,7 @@ func (f *fileArrayFlag) Set(v string) error {
 }
 
 // modeFlag only allows 3 digit octal numbers to be passed as flags
-type modeFlag []int64
+type modeFlag []uint32
 
 // String returns a string representation of the modeFlag
 func (f *modeFlag) String() string {
@@ -57,13 +58,13 @@ func (f *modeFlag) Set(v string) error {
 
 	// Check each character is a valid octal digit
 	for _, c := range v {
-		val, err := strconv.ParseInt(string(c), 8, 32)
+		val, err := strconv.ParseUint(string(c), 8, 32)
 
 		if err != nil {
 			return err
 		}
 
-		*f = append(*f, val)
+		*f = append(*f, uint32(val))
 	}
 
 	return nil
@@ -82,10 +83,10 @@ type permissions struct {
 }
 
 // newPermissions creates a permissions struct from a single octal digit
-func newPermissions(v int64) permissions {
+func newPermissions(v uint32) permissions {
 	p := permissions{}
 
-	binaryStr := strconv.FormatInt(v, 2)
+	binaryStr := strconv.FormatUint(uint64(v), 2)
 
 	for len(binaryStr) < 3 {
 		binaryStr = fmt.Sprintf("0%s", binaryStr)
@@ -125,6 +126,140 @@ func (p permissions) String() string {
 	return s
 }
 
+// octal returns an octal representation of the permissions.
+func (p permissions) octal() uint32 {
+	var v uint32 = 0
+
+	if p.read {
+		v += 4
+	}
+
+	if p.write {
+		v += 2
+	}
+
+	if p.execute {
+		v += 1
+	}
+
+	return v
+}
+
+// or sets the values of the read, write, and execute fields by or-ing them
+// with the same fields in the b argument
+func (p *permissions) or(b permissions) {
+	p.read = p.read || b.read
+	p.write = p.write || b.write
+	p.execute = p.execute || b.execute
+}
+
+// permissionsSet holds permissions for a file / directory's owner, group,
+// and everyone
+type permissionsSet struct {
+	// owner permissions
+	owner permissions
+
+	// group permissions
+	group permissions
+
+	// everyone permissions
+	everyone permissions
+}
+
+// newPermissionsSet creates a permissionsSet from an array of 3 octal digits
+func newPermissionsSet(v []uint32) permissionsSet {
+	p := permissionsSet{}
+
+	p.owner = newPermissions(v[0])
+	p.group = newPermissions(v[1])
+	p.everyone = newPermissions(v[2])
+
+	return p
+}
+
+// String returns a string representation of a permissionsSet
+func (p permissionsSet) String() string {
+	return fmt.Sprintf("%s %s %s", p.owner, p.group, p.everyone)
+}
+
+// octal returns a 4 digit octal representation of the permissionsSet. The dir
+// argument indicates if the directory bit should be set to "1".
+func (p permissionsSet) octal(dir bool) uint32 {
+	var dirBit uint32 = 0
+	if dir {
+		dirBit = 1
+	}
+
+	n := dirBit<<9 |
+		p.owner.octal()<<6 |
+		p.group.octal()<<3 |
+		p.everyone.octal()
+
+	return n
+}
+
+// or runs permissions.or() on the owner, group, and everyone fields against
+// the same fields in the b argument
+func (p *permissionsSet) or(b permissionsSet) {
+	p.owner.or(b.owner)
+	p.group.or(b.group)
+	p.everyone.or(b.everyone)
+}
+
+// setPermissions ensures that every file / directory in paths has the
+// permissions specified in perms
+func setPermissions(logger golog.Logger, paths []string,
+	perms permissionsSet) error {
+
+	for _, targetPath := range paths {
+		err := filepath.Walk(targetPath, func(path string,
+			info os.FileInfo, err error) error {
+
+			if err != nil {
+				return err
+			}
+
+			// Get existing permissions
+			modeBits := []uint32{}
+			infoMode := uint32(info.Mode())
+			modeBits = append(modeBits, 0x1C0&infoMode)
+			modeBits = append(modeBits, 0x38&infoMode)
+			modeBits = append(modeBits, 0x7&infoMode)
+
+			currentPerms := newPermissionsSet(modeBits)
+
+			// Determine mode of new file
+			updatedPerms := perms
+			updatedPerms.or(currentPerms)
+
+			// Determine if permissions update needs to occur
+			if currentPerms != updatedPerms {
+				octal := updatedPerms.octal(info.IsDir())
+				fileMode := os.FileMode(octal)
+
+				err := os.Chmod(targetPath, fileMode)
+				if err != nil {
+					return fmt.Errorf("error running "+
+						"chmod: %s", err.Error())
+				}
+
+				logger.Infof("chmod %s %s",
+					strconv.FormatUint(uint64(octal), 8),
+					path)
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("error ensuring permissions for "+
+				"\"%s\": %s", targetPath, err.Error())
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	// {{{1 Initialize logger
 	logger := golog.NewStdLogger("ensure-access")
@@ -154,8 +289,8 @@ func main() {
 	}
 
 	// {{{1 Extract permissions from mode octal
-	ownerPerms := newPermissions(mode[0])
-	groupPerms := newPermissions(mode[1])
-	everyonePerms := newPermissions(mode[2])
+	perms := newPermissionsSet(mode)
 
+	// {{{1 Set permissions once on startup
+	setPermissions(logger, paths, perms)
 }

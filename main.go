@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Noah-Huppert/golog"
 )
@@ -291,10 +293,12 @@ func main() {
 	// {{{2 Define flags
 	var mode modeFlag
 	var paths fileArrayFlag
+	var poll uint
 	var dryRun bool
 
 	flag.Var(&mode, "mode", "3 digit octal representation of permissions to set for files / directories")
 	flag.Var(&paths, "path", "Files / directories for which permissions will be set")
+	flag.UintVar(&poll, "poll", 30, "Time between file / directory permission checks, defaults to 30 seconds")
 	flag.BoolVar(&dryRun, "dry-run", false, "Print actions which would occur without executing actions")
 
 	// {{{2 Parse flags
@@ -315,5 +319,38 @@ func main() {
 	perms := newPermissionsSet(mode)
 
 	// {{{1 Set permissions once on startup
+	logger.Info("setting permissions once on startup")
 	setPermissions(logger, dryRun, paths, perms)
+	logger.Info("done")
+
+	// {{{1 Handle interrupt signals
+	interruptChan := make(chan os.Signal, 1)
+	signal.Notify(interruptChan, os.Interrupt)
+
+	// {{{1 Poll
+	pollDuration, err := time.ParseDuration(fmt.Sprintf("%ds", poll))
+	if err != nil {
+		logger.Fatalf("error parsing -poll value \"%d\" into duration: %s", poll, err.Error())
+	}
+
+	pollTimer := time.NewTimer(pollDuration)
+
+	run := true
+	for run {
+		select {
+		case <-interruptChan:
+			run = false
+			logger.Info("exiting")
+			os.Exit(0)
+
+		case <-pollTimer.C:
+			logger.Infof("setting permissions after %d seconds", poll)
+
+			setPermissions(logger, dryRun, paths, perms)
+
+			logger.Info("done")
+
+			pollTimer.Reset(pollDuration)
+		}
+	}
 }

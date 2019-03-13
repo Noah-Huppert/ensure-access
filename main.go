@@ -298,7 +298,8 @@ func main() {
 
 	flag.Var(&mode, "mode", "3 digit octal representation of permissions to set for files / directories")
 	flag.Var(&paths, "path", "Files / directories for which permissions will be set")
-	flag.UintVar(&poll, "poll", 30, "Seconds between file / directory permission checks")
+	flag.UintVar(&poll, "poll", 30, "Seconds between file / directory permission checks. Value of 0 "+
+		"disables polling and causes program to run once and exit")
 	flag.BoolVar(&dryRun, "dry-run", false, "Print actions which would occur without executing actions")
 
 	// {{{2 Parse flags
@@ -322,6 +323,11 @@ func main() {
 	logger.Info("setting permissions once on startup")
 	setPermissions(logger, dryRun, paths, perms)
 	logger.Info("done")
+
+	// {{{1 Check if should poll
+	if poll == 0 {
+		os.Exit(0)
+	}
 
 	// {{{1 Handle interrupt signals
 	interruptChan := make(chan os.Signal, 1)

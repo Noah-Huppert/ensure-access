@@ -298,7 +298,7 @@ func main() {
 
 	flag.Var(&mode, "mode", "3 digit octal representation of permissions to set for files / directories")
 	flag.Var(&paths, "path", "Files / directories for which permissions will be set")
-	flag.UintVar(&poll, "poll", 30, "Time between file / directory permission checks, defaults to 30 seconds")
+	flag.UintVar(&poll, "poll", 30, "Seconds between file / directory permission checks")
 	flag.BoolVar(&dryRun, "dry-run", false, "Print actions which would occur without executing actions")
 
 	// {{{2 Parse flags

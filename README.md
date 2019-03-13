@@ -1,5 +1,5 @@
 # Ensure Access
-A Daemon which ensures that a certain level of access exists for files 
+A tool which ensures that a certain level of access exists for files 
 and directories.
 
 # Table Of Contents
